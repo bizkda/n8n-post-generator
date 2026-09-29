@@ -1,0 +1,513 @@
+{
+  "name": "GitHub repo to LinkedIn post (manual + approval)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Repo → LinkedIn post\nSubmit a repo URL, the AI drafts a post from the README, you review/edit it on a second form page, then it posts to LinkedIn.\n\nSetup: attach Ollama + LinkedIn credentials, pick your Person in the LinkedIn node.",
+        "width": 420
+      },
+      "id": "c01384fd-d383-44d1-a250-6ebb41d1b610",
+      "name": "Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        320,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Post a GitHub project",
+        "formDescription": "Paste a repo URL and I'll draft a LinkedIn post from its README.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Repo URL",
+              "placeholder": "https://github.com/owner/repo",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Notes",
+              "fieldType": "textarea",
+              "placeholder": "Optional: angle, what you learned, who it's for"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7d6e7251-ceb9-40de-8bb3-aa7de16e133f",
+      "name": "Repo Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        528,
+        256
+      ],
+      "webhookId": "aa8c5a6b-7511-484b-8715-9266b9637af9"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const url = ($json['Repo URL'] || '').trim();\nconst m = url.match(/github\\.com\\/([^\\/\\s]+)\\/([^\\/\\s#?]+)/i);\nif (!m) throw new Error('Could not parse a GitHub repo URL: ' + url);\nconst owner = m[1];\nconst repo = m[2].replace(/\\.git$/, '');\nreturn { json: { owner, repo, repoUrl: `https://github.com/${owner}/${repo}`, notes: $json['Notes'] || '' } };"
+      },
+      "id": "de6ec608-4a44-435e-a152-ab2e8e064be1",
+      "name": "Parse Repo URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $json.owner }}/{{ $json.repo }}/readme",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.raw"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "537f5db0-5fd9-456f-89ee-d488e210119e",
+      "name": "Fetch README",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $('Parse Repo URL').first().json.owner }}/{{ $('Parse Repo URL').first().json.repo }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e3d042b8-abba-4326-88e1-f1be376efb07",
+      "name": "Fetch Repo Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1184,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const p = $('Parse Repo URL').first().json;\nlet readme = String($('Fetch README').first().json.data || '');\nreadme = readme\n  .replace(/\\[!\\[[^\\]]*\\]\\([^)]*\\)\\]\\([^)]*\\)/g, '')   // linked badges\n  .replace(/!\\[[^\\]]*\\]\\([^)]*\\)/g, '')                // images\n  .replace(/<img[^>]*>/gi, '')\n  .trim()\n  .slice(0, 6000);\nconst meta = $json;\nreturn { json: {\n  ...p,\n  readme,\n  description: meta.description || '',\n  language: meta.language || '',\n  topics: (meta.topics || []).join(', ')\n} };"
+      },
+      "id": "945c3f47-c0f6-482d-8b82-256765dcc8b4",
+      "name": "Prepare Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Repo: {{ $json.repo }}\nDescription: {{ $json.description }}\nLanguage: {{ $json.language }}\nTopics: {{ $json.topics }}\nRepo link: {{ $json.repoUrl }}\nExtra notes from the author: {{ $json.notes }}\n\nREADME:\n{{ $json.readme }}\n{{ $json.feedback ? '\\n\\nThe previous draft was:\\n' + $json.draft + '\\n\\nRevise it using this feedback: ' + $json.feedback : '' }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You write LinkedIn posts for a developer sharing their own project. Write a post of 120-180 words: a one-line hook about the problem it solves, 2-3 sentences on what it does and how it is built (name the actual tools), one honest thing learned or a limitation, and a closing line inviting feedback. First person. No buzzwords like 'excited to announce' or 'game-changer'. At most 3 hashtags. No emojis except optionally one. End with the repo link. Ignore badges, install commands and license sections of the README. Output only the post text."
+            }
+          ]
+        }
+      },
+      "id": "3afc274e-e405-4e63-a15a-85be0851cf96",
+      "name": "Draft Post",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        1632,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "model": "minimax-m3:cloud",
+        "options": {}
+      },
+      "id": "3422e5cb-1a01-4324-a5b5-79c04bb8427c",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        1648,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Decision",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Publish"
+                  },
+                  {
+                    "option": "Regenerate"
+                  },
+                  {
+                    "option": "Cancel"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Edited post",
+              "fieldType": "textarea",
+              "placeholder": "Optional: paste your edited version here. Used instead of the draft when you Publish."
+            },
+            {
+              "fieldLabel": "Feedback",
+              "fieldType": "textarea",
+              "placeholder": "Optional: what to change. Used when you choose Regenerate."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "edc5f5e4-63e8-4d87-8a1a-ac7498a838fe",
+      "name": "Review Draft",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 1,
+      "position": [
+        1840,
+        256
+      ],
+      "webhookId": "a7d9e0b2-51c4-4f0e-8a36-91b2c4d5e6f7"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const base = $('Prepare Prompt').first().json;\nconst draft = $('Draft Post').last().json.text;\nconst decision = $json['Decision'];\nconst edited = ($json['Edited post'] || '').trim();\nconst feedback = ($json['Feedback'] || '').trim();\nreturn { json: {\n  ...base,\n  draft,\n  decision,\n  feedback,\n  finalText: edited || draft\n} };"
+      },
+      "id": "863cf3c4-ad89-4479-a692-01893c06a482",
+      "name": "Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2064,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "publish",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "Publish",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Publish"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "regenerate",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "Regenerate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Regenerate"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cancel",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "Cancel",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Cancel"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bb39be55-6c30-48df-9ef7-488f67f3a7de",
+      "name": "Route Decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2288,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.finalText }}",
+        "additionalFields": {}
+      },
+      "id": "f69989a0-b8b3-4b32-ab4f-733a89d41224",
+      "name": "Post to LinkedIn",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [
+        2512,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Posted to LinkedIn",
+        "completionMessage": "Your post is live.",
+        "options": {}
+      },
+      "id": "f0771976-bcfc-4094-b500-96bed6e768e9",
+      "name": "Posted",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 1,
+      "position": [
+        2720,
+        144
+      ],
+      "webhookId": "c3b8f1a4-72d6-4e19-b0a5-3f4e5d6c7b88"
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Cancelled",
+        "completionMessage": "Nothing was posted.",
+        "options": {}
+      },
+      "id": "30ba2ea6-ea74-4c8f-8ad4-6fbc8e47cc03",
+      "name": "Cancelled",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 1,
+      "position": [
+        2512,
+        416
+      ],
+      "webhookId": "d4c9a2b5-83e7-4f2a-91b6-4a5f6e7d8c99"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Repo Form": {
+      "main": [
+        [
+          {
+            "node": "Parse Repo URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Repo URL": {
+      "main": [
+        []
+      ]
+    },
+    "Fetch README": {
+      "main": [
+        [
+          {
+            "node": "Fetch Repo Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Repo Metadata": {
+      "main": [
+        [
+          {
+            "node": "Prepare Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Prompt": {
+      "main": [
+        [
+          {
+            "node": "Draft Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Draft Post",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft Post": {
+      "main": [
+        [
+          {
+            "node": "Review Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review Draft": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Route Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Decision": {
+      "main": [
+        [
+          {
+            "node": "Post to LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Draft Post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cancelled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "ca0eb9d2-af65-48e3-9468-30944ae6985c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ae2b54ccaf1793137b9f485e183251c8268127f403edb33948a067c485da07da"
+  },
+  "id": "Yd6umhKYLioqzepk",
+  "tags": []
+}
