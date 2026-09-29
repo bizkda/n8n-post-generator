@@ -156,7 +156,7 @@
     },
     {
       "parameters": {
-        "model": "minimax-m3:cloud",
+        "model": "llama3.2:latest",
         "options": {}
       },
       "id": "3422e5cb-1a01-4324-a5b5-79c04bb8427c",
@@ -166,7 +166,13 @@
       "position": [
         1648,
         480
-      ]
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "Rqa0iU3hmvjbG0PL",
+          "name": "Ollama account 2"
+        }
+      }
     },
     {
       "parameters": {
@@ -202,7 +208,12 @@
             }
           ]
         },
-        "options": {}
+        "limitWaitTime": true,
+        "resumeAmount": 6,
+        "resumeUnit": "minutes",
+        "options": {
+          "formDescription": "={{ '<b>Draft:</b><br><br>' + $('Draft Post').last().json.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\\n/g,'<br>') }}"
+        }
       },
       "id": "edc5f5e4-63e8-4d87-8a1a-ac7498a838fe",
       "name": "Review Draft",
@@ -381,7 +392,13 @@
     },
     "Parse Repo URL": {
       "main": [
-        []
+        [
+          {
+            "node": "Fetch README",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Fetch README": {
@@ -503,7 +520,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "ca0eb9d2-af65-48e3-9468-30944ae6985c",
+  "versionId": "8225ce81-e24a-4f00-9d29-b672ac63fd6d",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "ae2b54ccaf1793137b9f485e183251c8268127f403edb33948a067c485da07da"
